@@ -1,0 +1,80 @@
+# Manabrew: relay + browser client + Forge room pool, for Unraid's Compose
+# Manager plugin (or plain `docker compose up -d`). Settings live in .env.
+#
+# Nginx Proxy Manager reaches the containers by name on PROXY_NETWORK:
+#   play.example.com  -> http://manabrew-web:80
+#   relay.example.com -> http://manabrew-relay:9443   (Websockets Support ON)
+# No host ports are published; everything comes in through NPM.
+
+name: manabrew
+
+x-unraid: &unraid-icon
+  net.unraid.docker.icon: https://raw.githubusercontent.com/witchesofthehill/manabrew/main/public/icon-192x192.png
+
+services:
+  relay:
+    image: ghcr.io/witchesofthehill/manabrew-server:${MANABREW_TAG:-latest}
+    container_name: manabrew-relay
+    environment:
+      MANABREW_SERVER_KEY: "${MANABREW_SERVER_KEY:?set MANABREW_SERVER_KEY in .env}"
+      FORGE_MAX_ROOMS: "${FORGE_MAX_ROOMS:-20}"
+      RUST_LOG: "manabrew_server=info"
+    networks: [proxy]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9444/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    labels: *unraid-icon
+
+  web:
+    image: ghcr.io/witchesofthehill/manabrew-web:${MANABREW_TAG:-latest}
+    container_name: manabrew-web
+    environment:
+      # Public relay hostname, resolved by players' browsers. 443 -> wss://.
+      RELAY_HOST: "${RELAY_HOST:?set RELAY_HOST in .env}"
+      RELAY_PORT: "443"
+      # Ends up in the public /config.js. Leave empty unless play.* is behind a login.
+      RELAY_PASSWORD: "${WEB_RELAY_PASSWORD:-}"
+      HOSTED_AI_ENABLED: "true"
+      FORGE_WASM: "${FORGE_WASM:-false}"
+    # Caddy proxies Scryfall symbols per request; Docker's resolver forwarding
+    # to a home-lab DNS can drop the burst (upstream compose.selfhost.yml).
+    dns: [1.1.1.1, 8.8.8.8]
+    networks: [proxy]
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    labels:
+      <<: *unraid-icon
+      net.unraid.docker.webui: "https://${PLAY_HOST:-}"
+
+  node:
+    image: ghcr.io/witchesofthehill/manabrew-node:${MANABREW_TAG:-latest}
+    container_name: manabrew-node
+    environment:
+      SELF_HOSTED_NODE_RELAY_URL: "ws://manabrew-relay:9443"
+      SELF_HOSTED_NODE_SERVER_KEY: "${MANABREW_SERVER_KEY}"
+      SELF_HOSTED_NODE_ROOM_NAME: "${NODE_ROOM_NAME:-Forge Table}"
+      SELF_HOSTED_NODE_MAX_GAMES: "${NODE_MAX_GAMES:-3}"
+      SELF_HOSTED_NODE_MAX_PLAYERS: "${NODE_MAX_PLAYERS:-4}"
+      # Browsers only claim EMPTY, format-Any, unlocked rooms: keep these as-is.
+      SELF_HOSTED_NODE_FORMAT: "any"
+      SELF_HOSTED_NODE_BOT_ENABLED: "false"
+      RUST_LOG: "self_hosted_node=info"
+    mem_limit: "${NODE_MEM_LIMIT:-2g}"
+    networks: [proxy]
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    labels: *unraid-icon
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:-proxynet}
+    external: true

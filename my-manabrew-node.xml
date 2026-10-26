@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>manabrew-node</Name>
+  <Repository>ghcr.io/witchesofthehill/manabrew-node:latest</Repository>
+  <Registry>https://github.com/witchesofthehill/manabrew/pkgs/container/manabrew-node</Registry>
+  <Network>manabrew</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/witchesofthehill/manabrew/issues</Support>
+  <Project>https://docs.manabrew.app/self-hosting/</Project>
+  <Overview>Headless pool of Forge-engine rooms (GraalVM native, no JVM). It dials OUT to your relay and needs no published ports. Browser players need it for anything on the Forge engine: Forge 'Play vs AI' and Forge multiplayer tables both claim an EMPTY room from this pool, one room per game. Desktop players don't need it (the desktop app runs Forge locally). For browsers to find the rooms: Format must be 'any', AI bot must be false, Room password must be empty. About 1 GB RAM for 4 rooms. Stopping the container ends games in progress; drain first with 'docker kill --signal=USR1 manabrew-node'.</Overview>
+  <Category>GameServers:</Category>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/witchesofthehill/manabrew/main/public/icon-192x192.png</Icon>
+  <ExtraParams>--memory=2g</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>manabrew-relay running on the same Docker network.</Requires>
+  <Config Name="Relay URL" Target="SELF_HOSTED_NODE_RELAY_URL" Default="ws://manabrew-relay:9443" Mode="" Description="Internal address of your relay. Container-name DNS only works on a user-defined network; otherwise use ws://UNRAID-IP:9443. No TLS needed - this never leaves the box." Type="Variable" Display="always" Required="true" Mask="false">ws://manabrew-relay:9443</Config>
+  <Config Name="Server key" Target="SELF_HOSTED_NODE_SERVER_KEY" Default="" Mode="" Description="Must equal MANABREW_SERVER_KEY on manabrew-relay." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Room name" Target="SELF_HOSTED_NODE_ROOM_NAME" Default="Self-Hosted Node" Mode="" Description="Name of the pooled rooms. With Max games &gt; 1 they become 'Name (1)', 'Name (2)'..." Type="Variable" Display="always" Required="false" Mask="false">Forge Table</Config>
+  <Config Name="Room password" Target="SELF_HOSTED_NODE_ROOM_PASSWORD" Default="" Mode="" Description="Leave EMPTY if browser players should use these rooms: the browser claims a room without sending a password, so a locked room fails. The relay key already keeps strangers out." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Format" Target="SELF_HOSTED_NODE_FORMAT" Default="any" Mode="" Description="Keep 'any'. Browsers only claim rooms whose format is Any; players choose the actual format per game. (Forced to any anyway when Max games &gt; 1.)" Type="Variable" Display="advanced" Required="false" Mask="false">any</Config>
+  <Config Name="Max players" Target="SELF_HOSTED_NODE_MAX_PLAYERS" Default="4" Mode="" Description="Seats per room = you + AI opponents/friends. 4 allows a 4-player Commander pod." Type="Variable" Display="always" Required="false" Mask="false">4</Config>
+  <Config Name="Max games" Target="SELF_HOSTED_NODE_MAX_GAMES" Default="1" Mode="" Description="Pool size: the number of browser Forge games (vs AI or multiplayer) that can run AT THE SAME TIME. Each game takes one empty room. Roughly 1 GB RAM per 4." Type="Variable" Display="always" Required="false" Mask="false">3</Config>
+  <Config Name="AI bot" Target="SELF_HOSTED_NODE_BOT_ENABLED" Default="false" Mode="" Description="Keep FALSE. True pre-seats a bot (fixed preset deck) in every room as it opens, so rooms are never empty and browsers can't claim them. Bots are spawned on demand anyway, with the deck the player picks." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Auto start" Target="SELF_HOSTED_NODE_AUTO_START" Default="false" Mode="" Description="Start the game automatically when the room fills." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Engine backend" Target="SELF_HOSTED_NODE_ENGINE_BACKEND" Default="forge" Mode="" Description="forge (original Java Forge rules, the image default) or manabrew (Rust port)." Type="Variable" Display="advanced" Required="false" Mask="false">forge</Config>
+  <Config Name="Shared isolate" Target="SELF_HOSTED_NODE_SHARED_ISOLATE" Default="" Mode="" Description="Leave empty to share one engine + card DB across rooms (low RAM). Set 0 to isolate each game (more RAM, reloads the DB per game)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Log level" Target="RUST_LOG" Default="self_hosted_node=info" Mode="" Description="tracing env-filter." Type="Variable" Display="advanced" Required="false" Mask="false">self_hosted_node=info</Config>
+</Container>

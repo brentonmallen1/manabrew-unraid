@@ -1,0 +1,3 @@
+# Holds MANABREW_SERVER_KEY - never commit
+.env
+.DS_Store

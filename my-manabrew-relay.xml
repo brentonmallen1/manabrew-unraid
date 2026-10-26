@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>manabrew-relay</Name>
+  <Repository>ghcr.io/witchesofthehill/manabrew-server:latest</Repository>
+  <Registry>https://github.com/witchesofthehill/manabrew/pkgs/container/manabrew-server</Registry>
+  <Network>manabrew</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/witchesofthehill/manabrew/issues</Support>
+  <Project>https://docs.manabrew.app/hosting-relay/</Project>
+  <Overview>Manabrew relay (manabrew-server): lobbies, matchmaking and message relay. Browser and desktop clients, and the optional Forge node, all connect to it. It never runs games itself. Speaks plain ws:// on 9443; put it behind a TLS reverse proxy on its own hostname (e.g. relay.example.com) so clients connect over wss:// on 443.</Overview>
+  <Category>GameServers:</Category>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/witchesofthehill/manabrew/main/public/icon-192x192.png</Icon>
+  <ExtraParams>--stop-timeout 30</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Put this, manabrew-web and manabrew-node on the same user-defined Docker network (default: manabrew). Create it once with: docker network create manabrew</Requires>
+  <Config Name="WebSocket port" Target="9443" Default="9443" Mode="tcp" Description="Lobby/game WebSocket (plain ws://). Point your reverse proxy's relay hostname here. Don't port-forward this directly unless you accept unencrypted traffic." Type="Port" Display="always" Required="true" Mask="false">9443</Config>
+  <Config Name="Health port" Target="9444" Default="9444" Mode="tcp" Description="HTTP /health endpoint, for monitoring only. Never needs to be public." Type="Port" Display="advanced" Required="false" Mask="false">9444</Config>
+  <Config Name="Server key" Target="MANABREW_SERVER_KEY" Default="" Mode="" Description="Shared key every client and node must present as the first message, or the relay drops the connection (no room list, no room creation without it). This is your access control: use a long random value (openssl rand -hex 32), give it only to friends, and keep it OUT of manabrew-web's RELAY_PASSWORD unless that site is behind a login. Must match SELF_HOSTED_NODE_SERVER_KEY on manabrew-node. Falls back to 'forge' if empty - never leave it empty." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Max rooms" Target="FORGE_MAX_ROOMS" Default="100" Mode="" Description="Maximum concurrent rooms on this relay." Type="Variable" Display="always" Required="false" Mask="false">20</Config>
+  <Config Name="Log level" Target="RUST_LOG" Default="manabrew_server=info" Mode="" Description="tracing env-filter, e.g. manabrew_server=debug" Type="Variable" Display="advanced" Required="false" Mask="false">manabrew_server=info</Config>
+  <Config Name="Bind address" Target="FORGE_HOST" Default="0.0.0.0" Mode="" Description="Address the relay binds inside the container." Type="Variable" Display="advanced" Required="false" Mask="false">0.0.0.0</Config>
+  <Config Name="LAN mDNS advertise" Target="MANABREW_LAN_ADVERTISE" Default="false" Mode="" Description="Answer mDNS so desktop clients on your LAN auto-discover this relay. Only works with Network=host or br0 (mDNS doesn't cross Docker bridges). If true and Server key is empty, the key becomes 'manabrew-lan'. Leave false for internet play." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>

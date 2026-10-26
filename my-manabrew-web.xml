@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>manabrew-web</Name>
+  <Repository>ghcr.io/witchesofthehill/manabrew-web:latest</Repository>
+  <Registry>https://github.com/witchesofthehill/manabrew/pkgs/container/manabrew-web</Registry>
+  <Network>manabrew</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/witchesofthehill/manabrew/issues</Support>
+  <Project>https://docs.manabrew.app/hosting-web-client/</Project>
+  <Overview>Manabrew browser client (static app served by Caddy on :80), preconfigured to connect to your relay. Must be served over HTTPS (reverse proxy on e.g. play.example.com): the WASM engine needs SharedArrayBuffer, which browsers only allow in a secure, cross-origin-isolated page. Your proxy must pass through the Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy headers this container sends. Plain http://UNRAID-IP will load but games won't start.</Overview>
+  <Category>GameServers:</Category>
+  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/witchesofthehill/manabrew/main/public/icon-192x192.png</Icon>
+  <ExtraParams>--dns 1.1.1.1 --dns 8.8.8.8</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>manabrew-relay, plus a reverse proxy with TLS for both the web and relay hostnames.</Requires>
+  <Config Name="HTTP port" Target="80" Default="8095" Mode="tcp" Description="Container serves plain HTTP on 80. Map to any free host port and point your reverse proxy's play hostname at it." Type="Port" Display="always" Required="true" Mask="false">8095</Config>
+  <Config Name="Relay host" Target="RELAY_HOST" Default="" Mode="" Description="PUBLIC hostname browsers use to reach your relay, e.g. relay.example.com. This is resolved by your friends' browsers, not by this container, so don't use a container name or LAN IP. Empty = official relay.manabrew.app." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Relay port" Target="RELAY_PORT" Default="443" Mode="" Description="443 = wss:// (behind your TLS proxy, recommended). Any other port = plain ws://, which an HTTPS page can't open (mixed content)." Type="Variable" Display="always" Required="true" Mask="false">443</Config>
+  <Config Name="Relay password" Target="RELAY_PASSWORD" Default="" Mode="" Description="Gets written in plain text into /config.js, which anyone who can load this site can read. PRIVATE SETUP: leave empty (clients then try 'forge', get 'Invalid server key', and each friend enters the real key once in Settings - Server). Only set it to MANABREW_SERVER_KEY if this hostname sits behind a login (Cloudflare Access, Authelia, NPM access list)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Hosted AI (Forge)" Target="HOSTED_AI_ENABLED" Default="false" Mode="" Description="true = show the Forge 'Play vs AI' option in the browser, which runs on a manabrew-node room. Needs manabrew-node. The basic in-browser AI works without this." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="Forge in browser (experimental)" Target="FORGE_WASM" Default="false" Mode="" Description="Shows a Settings toggle that lets a browser run the Forge engine itself (72 MB download, tested per browser) instead of using a node room. Falls back to the node if the browser fails the test. Upstream ships this switched off." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>
