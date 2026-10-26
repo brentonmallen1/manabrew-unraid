@@ -307,7 +307,15 @@ change it. The compose stack fixes it in two parts:
 The rewrite runs every time the container starts, because a recreated container
 starts from fresh image files. To check it worked, run
 `docker exec manabrew-web grep -rl 'r2.dev/__assets' /srv/manabrew`. It should
-print nothing. The **templates (Option B) don't include this fix**, so symbols
+print nothing.
+
+The rewrite changes the JavaScript but not its filenames, so a browser or
+Cloudflare that cached a file before the rewrite would keep serving the old
+copy, and you'd still see CORS errors for `r2.dev` addresses. The Caddyfile
+sends `Cache-Control: no-cache` for the app's files so every cache checks back
+with the container (a quick "not modified" when nothing changed). If you
+deployed before that header was added, purge Cloudflare's cache (or at least
+`/assets/*.js`) and clear the site's data in the browser once. The **templates (Option B) don't include this fix**, so symbols
 stay broken there.
 
 ## Keeping it private

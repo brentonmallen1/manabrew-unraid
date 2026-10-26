@@ -198,11 +198,15 @@ configs:
               header Cross-Origin-Resource-Policy "same-origin"
           }
 
+          # no-cache: the entrypoint rewrite changes files without renaming them,
+          # so browsers and Cloudflare must revalidate (cheap 304s via ETag)
+          # rather than keep serving a copy from before the rewrite.
           handle {
               header {
                   Cross-Origin-Opener-Policy "same-origin"
                   Cross-Origin-Embedder-Policy "require-corp"
                   Cross-Origin-Resource-Policy "same-origin"
+                  Cache-Control "no-cache"
               }
               try_files {path} /index.html
               file_server
