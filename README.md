@@ -47,9 +47,9 @@ the [reverse proxy](#reverse-proxy-required-for-browser-play) steps are the same
 2. Copy the XMLs to `/boot/config/plugins/dockerMan/templates-user/`.
 3. Docker → Add Container → pick the template: relay first, then web, then node (optional).
 4. Generate a long random key (`openssl rand -hex 32`). Set it as relay
-   `MANABREW_SERVER_KEY` and node `SELF_HOSTED_NODE_SERVER_KEY`. Leave web's
-   `RELAY_PASSWORD` empty unless the web hostname is behind a login. See
-   [Keeping it private](#keeping-it-private).
+   `MANABREW_SERVER_KEY` and node `SELF_HOSTED_NODE_SERVER_KEY`. Set it as web's
+   `RELAY_PASSWORD` too, but only once the web hostname is behind an NPM Access
+   List. See [Keeping it private](#keeping-it-private).
 
 ## Reverse proxy (required for browser play)
 
@@ -92,7 +92,7 @@ instead. That works too.
 | Details | Cache Assets **off**: it rewrites `Cache-Control`, and `config.js` must not be cached |
 | Details | Block Common Exploits on, Websockets Support off (not needed) |
 | SSL | Request a new Let's Encrypt cert, Force SSL, HTTP/2, HSTS |
-| Access List | Optional. See [Keeping it private](#keeping-it-private). Only use one if you want `RELAY_PASSWORD` prefilled. |
+| Access List | Recommended: your friends list. See [Keeping it private](#keeping-it-private). It lets you set `RELAY_PASSWORD`, which browser Forge "Play vs AI" needs. |
 
 **4. Proxy host: `relay.example.com`**
 
@@ -123,12 +123,34 @@ DevTools → Console, and confirm `crossOriginIsolated` is `true`. For the relay
 502. A 502 means NPM can't reach `manabrew-relay`, which usually means the
 network from step 2 isn't set up.
 
+## Which hostnames are public
+
+| Hostname | Must be public? | Why |
+|---|---|---|
+| `relay.example.com` | **Yes** | Every client, browser or desktop, connects straight to it. The server key protects it. Never put a login page in front of it. |
+| `play.example.com` | Only if friends play in a browser on *your* web client | It only serves the app to browsers. Put it behind an NPM Access List (see [Keeping it private](#keeping-it-private)). |
+
+Can `play` be internal-only, with friends using the official `play.manabrew.app`
+and adding your relay in Settings → Server? Basic play works that way, but there
+are two catches:
+- **Forge "Play vs AI" won't use your server.** That button always reconnects to
+  the site's built-in relay, so on the official site it runs on Manabrew's own
+  servers, not your node. Forge *multiplayer tables* created while connected to
+  your relay do use your node.
+- **Version drift:** the official site always runs the newest client. If you pin
+  `MANABREW_TAG` to an older relay version, the two can stop understanding each
+  other. Stay on `latest` if you go this way.
+
+Desktop-only friends never need `play` at all.
+
+Even internal-only, `play` still needs HTTPS for browser games. An NPM Access List
+that only allows your LAN subnet does that: public DNS and a Let's Encrypt cert,
+but outside visitors get a 403.
+
 ## How friends connect
 
-- **Browser:** open `https://play.example.com`. The host is already filled in.
-  On the first visit, go to Settings → Server and paste the key. It's saved in
-  that browser. (They could also use the official `play.manabrew.app` and add your
-  relay there, so the web container is a convenience, not a requirement.)
+- **Browser:** open `https://play.example.com` and sign in with the Access List
+  username and password you gave them. Everything else is preconfigured.
 - **Windows/macOS desktop app:** Settings → Server. Host `relay.example.com`,
   port `443`, password = your server key.
 
@@ -155,6 +177,7 @@ all three containers. The settings that matter:
 | Where | Setting | Why |
 |---|---|---|
 | web | `HOSTED_AI_ENABLED=true` | Shows the Forge "Play vs AI" option in the browser |
+| web | `RELAY_PASSWORD` = server key | "Play vs AI" reconnects using the site's built-in key and ignores the one a player typed into Settings. If it's empty, Forge "Play vs AI" fails with "Invalid server key". |
 | node | `SELF_HOSTED_NODE_FORMAT=any` | Browsers only claim `Any` rooms. Players still choose the format per game. |
 | node | `SELF_HOSTED_NODE_BOT_ENABLED=false` | `true` puts a preset-deck bot in every room as it opens, so rooms are never empty and browsers skip them |
 | node | `SELF_HOSTED_NODE_ROOM_PASSWORD` empty | The browser claims a room without sending a password |
@@ -173,16 +196,21 @@ other first message gets dropped, and so does no message within 10 seconds.
 Without the key, nobody can list rooms, create one, or join one. So the whole job
 is keeping that key out of public view:
 
-1. **Don't put the key in the web container.** `RELAY_PASSWORD` is written in
-   plain text into `/config.js`, which anyone who loads your site can read. Leave
-   it empty, and friends paste the key into Settings once. A stranger who finds
-   `play.example.com` gets a static page that fails with "Invalid server key".
-   - *Optional:* put `play.example.com` behind a login, such as an NPM Access List
-     (basic auth with one user per friend), Authelia, or Cloudflare Access. Then
-     you can set `RELAY_PASSWORD` so friends don't have to paste anything.
+1. **Put `play.example.com` behind an NPM Access List, then set `RELAY_PASSWORD`.**
+   `RELAY_PASSWORD` is written in plain text into `/config.js`, so only logged-in
+   friends should be able to load that file. Browser Forge "Play vs AI" needs the
+   key there (see [Bots](#bots)).
+   - NPM → Access Lists → Add. On the **Authorization** tab, add one
+     username/password per friend. On the **Access** tab, `allow` your LAN
+     subnet (e.g. `192.168.1.0/24`), and set **Satisfy Any** on the Details tab.
+     With that, you skip the login prompt at home and friends log in once.
+     Then attach the list to the `play` proxy host.
+   - Without an Access List, leave `RELAY_PASSWORD` empty. Friends paste the key
+     into Settings → Server instead. Everything works except browser Forge
+     "Play vs AI" (basic AI and Forge multiplayer tables are fine).
    - **Don't** put `relay.example.com` behind a login page. The desktop app can't
-     get through a browser redirect, so the key has to protect that hostname
-     on its own.
+     get through basic auth or a redirect, so the key has to protect that
+     hostname on its own.
 2. **Make the key long and random** (`openssl rand -hex 32`). The relay doesn't
    rate-limit failed attempts, so a short key could be brute-forced. A 64-hex-char
    key can't be.
