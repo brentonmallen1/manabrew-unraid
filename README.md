@@ -208,6 +208,51 @@ everyone. A node room keeps running on your server. Turn it on only if friends
 keep hitting "No self-hosted room is available" and you'd rather not raise
 `NODE_MAX_GAMES`.
 
+## Community decks
+
+The community deck library ("Deck Hub") is a separate Manabrew service at
+`api.manabrew.app`. It's not part of this stack, and it has nothing to do with
+your relay. Decks themselves live in each player's app or browser, and any deck in
+someone's library plays on your server. The hub is only a place to find and share
+them.
+
+| Player uses | Community decks |
+|---|---|
+| Desktop app | **Work as usual.** The app talks to the official hub directly, whatever relay it's connected to. |
+| Your web client (`play.example.com`) | **Don't load.** The official hub's CORS policy only allows browser requests from `play.manabrew.app` and the desktop app. For any other site it sends no `Access-Control-Allow-Origin` header, so the browser blocks the request. The community shelf stays empty, and sign-in and publishing fail for the same reason. |
+
+**Workaround for browser players: copy and paste the decklist.** Open the deck on
+`play.manabrew.app`, then use the copy button in the deck preview, or **Copy deck
+list** in the deck builder. Paste it into the deck builder's text import on your
+site. Built-in preset decks work everywhere without the hub. (There are also
+Moxfield and Archidekt importers. They haven't been tested from a self-hosted
+site.)
+
+### Optional: your own hub
+
+Upstream publishes the hub as `ghcr.io/witchesofthehill/manabrew-hub`. If your
+browser players want a private shared library, you can run it as a fourth
+container. Before you do, know that:
+
+- **It starts with only the built-in preset decks.** It doesn't copy or mirror the
+  official community library. It holds only what your group publishes.
+- **Publishing requires sign-in**, so you'd register a GitHub or Discord OAuth app
+  (`GITHUB_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`), or add a Resend
+  key (`RESEND_API_KEY`) for email codes. With none of these, people can browse
+  but can't publish.
+- **Desktop players won't see it.** The desktop app always uses the official hub,
+  so a self-hosted hub only serves your web client.
+- **Setup:** port `9500`, storage in a single SQLite file (`HUB_DB_PATH`, on a
+  persistent volume), `HUB_PUBLIC_URL` = the hub's public URL, `WEB_APP_URL` =
+  `https://play.example.com` (this sets its CORS allowance), and `DECK_HUB=1`. On
+  the web container, set `HUB_API_URL` to the hub's URL. Give it its own NPM
+  proxy host. Avatar and playmat uploads also need S3 settings (`HUB_S3_*`).
+  Without them, uploads are just disabled.
+
+For most friend groups this isn't worth it: desktop players keep the official
+library, and browser players can paste decklists. This repo doesn't include a hub
+template or compose service.
+
 ## Keeping it private
 
 The relay is the only thing that matters, and the server key gates it. A
