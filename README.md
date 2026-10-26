@@ -271,9 +271,10 @@ which needs Docker Compose **2.23.1 or newer**. Check with `docker compose versi
 in the Unraid terminal. If it's older, update the Compose Manager plugin.
 
 **Upstream changes:** the mounted Caddyfile replaces the one built into the web
-image. It's a copy of upstream's `ops/standalone.Caddyfile` plus the `/hub`
-route. If a release changes upstream's file (for example a new proxy route),
-copy the change into `docker-compose.yml`.
+image. It's a copy of upstream's `ops/standalone.Caddyfile` plus the `/hub` and
+`/scryfall-assets` routes (see [Card symbols](#card-symbols-and-card-backs)). If a
+release changes upstream's file (for example a new proxy route), copy the change
+into `docker-compose.yml`.
 
 ### Without the hub (templates)
 
@@ -283,6 +284,31 @@ and paste decklists: open the deck on `play.manabrew.app`, use **Copy deck list*
 (or the copy button in a deck preview), and paste it into the text import on
 your site. Built-in preset decks always work. (There are also Moxfield and
 Archidekt importers. They haven't been tested from a self-hosted site.)
+
+## Card symbols and card backs
+
+The published web image is built with a Scryfall mirror baked in: Manabrew's
+Cloudflare R2 bucket (`https://pub-….r2.dev/__assets/`). The app loads mana
+symbols, set symbols and card backs from there. That bucket's CORS policy only
+allows `play.manabrew.app`, so on your site those SVGs fail with CORS errors in
+the console.
+
+The address is compiled into the JavaScript, so no environment variable can
+change it. The compose stack fixes it in two parts:
+
+1. The web container's `entrypoint` rewrites the mirror address in the bundle to
+   `/scryfall-assets/` before the image's normal startup script runs. It matches
+   any `pub-*.r2.dev/__assets/` address, so a new bucket name in a future release
+   is handled too.
+2. The mounted Caddyfile serves `/scryfall-assets/` by fetching from Scryfall
+   directly (`svgs.scryfall.io`, and `backs.scryfall.io` for card backs), the same
+   way upstream already handles `/scryfall-symbols/`.
+
+The rewrite runs every time the container starts, because a recreated container
+starts from fresh image files. To check it worked, run
+`docker exec manabrew-web grep -rl 'r2.dev/__assets' /srv/manabrew`. It should
+print nothing. The **templates (Option B) don't include this fix**, so symbols
+stay broken there.
 
 ## Keeping it private
 

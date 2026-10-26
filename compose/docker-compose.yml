@@ -57,6 +57,16 @@ services:
       FORGE_WASM: "${FORGE_WASM:-false}"
       # Accounts and community decks go to our hub instead of api.manabrew.app.
       HUB_API_URL: "https://${PLAY_HOST:?set PLAY_HOST in .env}/hub"
+    # The published bundle loads symbols and card backs from Manabrew's R2 mirror,
+    # whose CORS only allows play.manabrew.app. Point it at our own same-origin
+    # /scryfall-assets/ proxy (see the Caddyfile) before the image's entrypoint runs.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        grep -rl 'https://pub-[0-9a-f]*\.r2\.dev/__assets/' /srv/manabrew
+        | xargs -r sed -i 's#https://pub-[0-9a-f]*\.r2\.dev/__assets/#/scryfall-assets/#g';
+        exec manabrew-entrypoint.sh
     ports:
       - "${WEB_HOST_PORT:-8095}:80"
     configs:
@@ -120,7 +130,8 @@ services:
     labels: *unraid-icon
 
 configs:
-  # Upstream's default web Caddyfile (ops/standalone.Caddyfile) plus /hub.
+  # Upstream's default web Caddyfile (ops/standalone.Caddyfile) plus /hub and
+  # /scryfall-assets.
   # Replaces the one baked into the image, so re-check it against upstream if a
   # release changes that file.
   web_caddyfile:
@@ -133,6 +144,27 @@ configs:
           # Our deck hub, same-origin: /hub/api/... -> manabrew-hub:9500/api/...
           handle_path /hub/* {
               reverse_proxy manabrew-hub:9500
+          }
+
+          # Stand-in for the R2 asset mirror the bundle is rewritten away from:
+          # same keys as the mirror (svgs.scryfall.io paths, backs/ prefix).
+          handle_path /scryfall-assets/backs/* {
+              reverse_proxy https://backs.scryfall.io {
+                  header_up Host backs.scryfall.io
+                  header_down -Access-Control-Allow-Origin
+                  header_down -Cross-Origin-Resource-Policy
+              }
+              header Cross-Origin-Resource-Policy "same-origin"
+          }
+          handle_path /scryfall-assets/* {
+              reverse_proxy https://svgs.scryfall.io {
+                  header_up Host svgs.scryfall.io
+                  header_down -Access-Control-Allow-Origin
+                  header_down -Cross-Origin-Resource-Policy
+                  header_down -Cache-Control
+              }
+              header Cache-Control "public, max-age=604800"
+              header Cross-Origin-Resource-Policy "same-origin"
           }
 
           # Runtime relay config (rewritten from RELAY_* env on start) - never cache it.
