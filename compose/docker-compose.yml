@@ -1,10 +1,12 @@
 # Manabrew: relay + browser client + Forge room pool, for Unraid's Compose
 # Manager plugin (or plain `docker compose up -d`). Settings live in .env.
 #
-# Nginx Proxy Manager reaches the containers by name on PROXY_NETWORK:
-#   play.example.com  -> http://manabrew-web:80
-#   relay.example.com -> http://manabrew-relay:9443   (Websockets Support ON)
-# No host ports are published; everything comes in through NPM.
+# The stack runs on its own bridge network (manabrew); the node reaches the
+# relay by name there. Only web and relay are published on the Unraid host, and
+# Nginx Proxy Manager forwards to them:
+#   play.example.com  -> http://UNRAID-IP:${WEB_HOST_PORT}
+#   relay.example.com -> http://UNRAID-IP:${RELAY_HOST_PORT}  (Websockets Support ON)
+# If NPM is on br0, enable Settings > Docker > "Host access to custom networks".
 
 name: manabrew
 
@@ -19,7 +21,10 @@ services:
       MANABREW_SERVER_KEY: "${MANABREW_SERVER_KEY:?set MANABREW_SERVER_KEY in .env}"
       FORGE_MAX_ROOMS: "${FORGE_MAX_ROOMS:-20}"
       RUST_LOG: "manabrew_server=info"
-    networks: [proxy]
+    # WebSocket only; the 9444 health/metrics port stays internal.
+    ports:
+      - "${RELAY_HOST_PORT:-9443}:9443"
+    networks: [manabrew]
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
@@ -37,14 +42,16 @@ services:
       # Public relay hostname, resolved by players' browsers. 443 -> wss://.
       RELAY_HOST: "${RELAY_HOST:?set RELAY_HOST in .env}"
       RELAY_PORT: "443"
-      # Ends up in the public /config.js. Leave empty unless play.* is behind a login.
+      # Ends up in /config.js. Set it only once play.* is behind an NPM Access List.
       RELAY_PASSWORD: "${WEB_RELAY_PASSWORD:-}"
       HOSTED_AI_ENABLED: "true"
       FORGE_WASM: "${FORGE_WASM:-false}"
+    ports:
+      - "${WEB_HOST_PORT:-8095}:80"
     # Caddy proxies Scryfall symbols per request; Docker's resolver forwarding
     # to a home-lab DNS can drop the burst (upstream compose.selfhost.yml).
     dns: [1.1.1.1, 8.8.8.8]
-    networks: [proxy]
+    networks: [manabrew]
     restart: unless-stopped
     depends_on:
       relay:
@@ -67,7 +74,7 @@ services:
       SELF_HOSTED_NODE_BOT_ENABLED: "false"
       RUST_LOG: "self_hosted_node=info"
     mem_limit: "${NODE_MEM_LIMIT:-2g}"
-    networks: [proxy]
+    networks: [manabrew]
     restart: unless-stopped
     depends_on:
       relay:
@@ -75,6 +82,5 @@ services:
     labels: *unraid-icon
 
 networks:
-  proxy:
-    name: ${PROXY_NETWORK:-proxynet}
-    external: true
+  manabrew:
+    name: manabrew

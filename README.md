@@ -11,9 +11,12 @@ Three templates, from upstream images (all `linux/amd64`, published to GHCR):
 ```
 friends' browser ──https──▶ play.example.com ─┐
 friends' browser ──wss───▶ relay.example.com ─┤  reverse proxy (TLS)
-desktop app ───────wss───▶ relay.example.com ─┘        │
+desktop app ───────wss───▶ relay.example.com ─┘        │  (NPM)
                                                        ▼
+                         UNRAID-IP:8095      UNRAID-IP:9443          published host ports
+                               │                   │
                          manabrew-web:80     manabrew-relay:9443 ◀──ws── manabrew-node
+                         └──────────── "manabrew" bridge network ─────────────┘
 ```
 
 ## Option A: one compose stack (recommended)
@@ -25,9 +28,11 @@ Manager** plugin (from Community Applications):
 1. Docker tab → Compose → Add New Stack, named `manabrew`.
 2. Paste in `docker-compose.yml`. Under "Edit Stack → ENV file", paste
    `.env.example` and fill it in.
-3. Set `PROXY_NETWORK` to the network your NPM container uses. The stack joins it
-   as an external network, so NPM reaches `manabrew-web` and `manabrew-relay` by
-   name. Nothing is published on host ports.
+3. Networking needs nothing from you. The stack creates its own `manabrew` bridge
+   network (the node reaches the relay by name on it) and publishes only two
+   ports on the Unraid host: web on `WEB_HOST_PORT` (8095) and relay on
+   `RELAY_HOST_PORT` (9443). NPM forwards to those. See
+   [Nginx Proxy Manager](#nginx-proxy-manager).
 4. Compose Up. To update, click "Update Stack", which pulls all three and restarts
    them together.
 
@@ -38,12 +43,13 @@ the [reverse proxy](#reverse-proxy-required-for-browser-play) steps are the same
 
 ## Option B: three Unraid templates
 
-1. Create the shared network (Unraid terminal):
+1. Create the shared network (Unraid terminal), so the node can reach the relay
+   by name:
    ```bash
    docker network create manabrew
    ```
-   If your reverse proxy container already uses a custom network (e.g. `proxynet`),
-   set each template's Network to that one instead and skip this step.
+   The templates publish web on 8095 and relay on 9443, which is what NPM forwards
+   to.
 2. Copy the XMLs to `/boot/config/plugins/dockerMan/templates-user/`.
 3. Docker → Add Container → pick the template: relay first, then web, then node (optional).
 4. Generate a long random key (`openssl rand -hex 32`). Set it as relay
@@ -67,28 +73,32 @@ public IP. A wildcard `*.example.com` also works. On the router, forward
 external 80 and 443 to NPM's HTTP and HTTPS ports. If you use Cloudflare's orange
 cloud, set SSL mode to *Full (strict)*. Cloudflare passes WebSockets through.
 
-**2. Address containers by name, not by IP.** Container IPs on a Docker network
-change when containers are recreated, for example on every Unraid update. Put NPM
-on the `manabrew` network as well:
+**2. Forward to the Unraid host's ports.** NPM never joins the Manabrew network.
+It forwards to the two ports the stack publishes on the Unraid host, using the
+server's LAN IP (`UNRAID-IP` below, e.g. `192.168.2.147`). That stays the same no
+matter how often the containers get recreated or re-addressed.
+
+If NPM runs on `br0` (its own LAN IP), it **can't reach the Unraid host's IP by
+default**, because macvlan/ipvlan isolates containers from their host. Turn on
+Settings → Docker → **Host access to custom networks** (Advanced View; you have
+to stop the Docker service to change it). If NPM runs on a normal bridge network
+with published ports, you don't need this.
+
+Fallback if you can't enable host access: attach NPM to the stack's network and
+forward to `manabrew-web:80` / `manabrew-relay:9443` by name instead. Add this to
+the end of NPM's template under Post Arguments, so it reattaches every time
+Unraid recreates NPM. This is a common community workaround, not an official
+Unraid feature. Use your NPM container's name, from `docker ps`:
 
 ```bash
-docker network connect manabrew Nginx-Proxy-Manager-Official
+&& docker network connect manabrew Nginx-Proxy-Manager-Official
 ```
-
-(Use your NPM container's real name, from `docker ps`.) Unraid drops networks
-added this way whenever NPM is recreated. The lasting fix is one shared network
-that NPM and all three Manabrew containers use as their main network. If NPM
-already has a custom network (often `proxynet`), set the Manabrew templates'
-Network to that instead of `manabrew`. Container names still resolve, so the
-node's `ws://manabrew-relay:9443` doesn't change. If you'd rather not share a
-network, forward to `UNRAID-IP` plus the mapped host ports (`8095`, `9443`)
-instead. That works too.
 
 **3. Proxy host: `play.example.com`**
 
 | Tab | Setting |
 |---|---|
-| Details | Scheme `http`, Forward Hostname `manabrew-web`, Port `80` |
+| Details | Scheme `http`, Forward Hostname `UNRAID-IP`, Port `8095` (`WEB_HOST_PORT`) |
 | Details | Cache Assets **off**: it rewrites `Cache-Control`, and `config.js` must not be cached |
 | Details | Block Common Exploits on, Websockets Support off (not needed) |
 | SSL | Request a new Let's Encrypt cert, Force SSL, HTTP/2, HSTS |
@@ -98,7 +108,7 @@ instead. That works too.
 
 | Tab | Setting |
 |---|---|
-| Details | Scheme `http`, Forward Hostname `manabrew-relay`, Port `9443` |
+| Details | Scheme `http`, Forward Hostname `UNRAID-IP`, Port `9443` (`RELAY_HOST_PORT`) |
 | Details | **Websockets Support on** (required) |
 | Details | Block Common Exploits on, Cache Assets off |
 | SSL | Let's Encrypt cert, Force SSL, HTTP/2 |
@@ -107,9 +117,10 @@ instead. That works too.
 You don't need anything in the Advanced tab. The relay pings every 25 s, which is
 under nginx's 60 s idle timeout, so game sockets stay open.
 
-**5. Lock down the direct ports (optional).** Once NPM reaches the containers by
-name, you can delete the port mappings from the relay (9443, 9444) and web (8095)
-templates. Then the only way in is through NPM with TLS.
+**5. Direct ports.** `UNRAID-IP:8095` and `UNRAID-IP:9443` are also reachable
+directly on your home network, without TLS. That's LAN only: don't forward them
+on the router. The relay still requires the key. Health/metrics (9444) isn't
+published at all.
 
 **6. Check it:**
 
@@ -120,8 +131,8 @@ curl -sI https://play.example.com | grep -i cross-origin
 You should see all three `Cross-Origin-*` headers. Then open the site, go to
 DevTools → Console, and confirm `crossOriginIsolated` is `true`. For the relay,
 `curl -sI https://relay.example.com` should return a response from nginx, not a
-502. A 502 means NPM can't reach `manabrew-relay`, which usually means the
-network from step 2 isn't set up.
+502. A 502 on both hosts means NPM can't reach `UNRAID-IP`. With NPM on `br0`,
+that's almost always *Host access to custom networks* being off (step 2).
 
 ## Which hostnames are public
 
