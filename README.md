@@ -7,6 +7,7 @@ Three templates, from upstream images (all `linux/amd64`, published to GHCR):
 | `my-manabrew-relay.xml` | `manabrew-server` | **Required**: the lobby every client connects to | `relay.example.com` → `:9443` |
 | `my-manabrew-web.xml` | `manabrew-web` | Recommended: your own browser URL, already pointed at your relay | `play.example.com` → `:8095` |
 | `my-manabrew-node.xml` | `manabrew-node` | Needed if browser players want the Forge engine or Forge AI ([Bots](#bots)) | none (only connects out) |
+| compose only | `manabrew-hub` | Accounts and a private shared deck library for your web client ([the hub](#accounts-and-shared-decks-the-hub)) | `play.example.com/hub` (via the web container) |
 
 ```
 friends' browser ──https──▶ play.example.com ─┐
@@ -22,7 +23,8 @@ desktop app ───────wss───▶ relay.example.com ─┘       
 ## Option A: one compose stack (recommended)
 
 [compose/docker-compose.yml](compose/docker-compose.yml) runs the same three
-containers from a single file, with one `.env`. Use Unraid's **Docker Compose
+containers, plus the [hub](#accounts-and-shared-decks-the-hub) for accounts and
+shared decks, from a single file with one `.env`. Use Unraid's **Docker Compose
 Manager** plugin (from Community Applications):
 
 1. Docker tab → Compose → Add New Stack, named `manabrew`.
@@ -33,12 +35,14 @@ Manager** plugin (from Community Applications):
    ports on the Unraid host: web on `WEB_HOST_PORT` (8095) and relay on
    `RELAY_HOST_PORT` (9443). NPM forwards to those. See
    [Nginx Proxy Manager](#nginx-proxy-manager).
-4. Compose Up. To update, click "Update Stack", which pulls all three and restarts
-   them together.
+4. Compose Up. To update, click "Update Stack", which pulls all the images and
+   restarts them together.
+5. Configure at least one [sign-in method](#setting-up-sign-in) so your group can
+   create accounts.
 
 What this gets you over the templates: the key is set once, the network is
 already wired up, the node waits until the relay is healthy before starting, and
-all three containers always run the same version (`MANABREW_TAG`). After that,
+every container always runs the same version (`MANABREW_TAG`). After that,
 the [reverse proxy](#reverse-proxy-required-for-browser-play) steps are the same.
 
 ## Option B: three Unraid templates
@@ -208,50 +212,77 @@ everyone. A node room keeps running on your server. Turn it on only if friends
 keep hitting "No self-hosted room is available" and you'd rather not raise
 `NODE_MAX_GAMES`.
 
-## Community decks
+## Accounts and shared decks (the hub)
 
-The community deck library ("Deck Hub") is a separate Manabrew service at
-`api.manabrew.app`. It's not part of this stack, and it has nothing to do with
-your relay. Decks themselves live in each player's app or browser, and any deck in
-someone's library plays on your server. The hub is only a place to find and share
-them.
+Accounts and the community deck library ("Deck Hub") come from a separate service,
+the **hub**. Manabrew's official one is at `api.manabrew.app`, but it only accepts
+browser requests from `play.manabrew.app` and the desktop app (its CORS policy).
+On any other site, sign-in fails with "Sign-in methods could not be loaded" and the
+community shelf stays empty.
 
-| Player uses | Community decks |
-|---|---|
-| Desktop app | **Work as usual.** The app talks to the official hub directly, whatever relay it's connected to. |
-| Your web client (`play.example.com`) | **Don't load.** The official hub's CORS policy only allows browser requests from `play.manabrew.app` and the desktop app. For any other site it sends no `Access-Control-Allow-Origin` header, so the browser blocks the request. The community shelf stays empty, and sign-in and publishing fail for the same reason. |
+So the compose stack runs **its own hub** (`manabrew-hub`), and your web client
+uses it instead:
 
-**Workaround for browser players: copy and paste the decklist.** Open the deck on
-`play.manabrew.app`, then use the copy button in the deck preview, or **Copy deck
-list** in the deck builder. Paste it into the deck builder's text import on your
-site. Built-in preset decks work everywhere without the hub. (There are also
-Moxfield and Archidekt importers. They haven't been tested from a self-hosted
-site.)
+- It's served at `https://play.example.com/hub` by the web container's own Caddy
+  (the compose file mounts a Caddyfile for this). That's the same origin as the
+  app, so there's no CORS problem, and it sits behind your NPM Access List with
+  the rest of `play`. Nobody can reach sign-up without getting past your login
+  first. Nothing changes in NPM.
+- Your group signs in, saves account decks, publishes decks to your private
+  community library, and favorites them.
+- The relay checks hub sign-ins (`MANABREW_HUB_JWKS_URL`, over the internal
+  network), so signed-in players show up with verified names.
 
-### Optional: your own hub
-
-Upstream publishes the hub as `ghcr.io/witchesofthehill/manabrew-hub`. If your
-browser players want a private shared library, you can run it as a fourth
-container. Before you do, know that:
-
+**Limits:**
 - **It starts with only the built-in preset decks.** It doesn't copy or mirror the
   official community library. It holds only what your group publishes.
-- **Publishing requires sign-in**, so you'd register a GitHub or Discord OAuth app
-  (`GITHUB_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`), or add a Resend
-  key (`RESEND_API_KEY`) for email codes. With none of these, people can browse
-  but can't publish.
-- **Desktop players won't see it.** The desktop app always uses the official hub,
-  so a self-hosted hub only serves your web client.
-- **Setup:** port `9500`, storage in a single SQLite file (`HUB_DB_PATH`, on a
-  persistent volume), `HUB_PUBLIC_URL` = the hub's public URL, `WEB_APP_URL` =
-  `https://play.example.com` (this sets its CORS allowance), and `DECK_HUB=1`. On
-  the web container, set `HUB_API_URL` to the hub's URL. Give it its own NPM
-  proxy host. Avatar and playmat uploads also need S3 settings (`HUB_S3_*`).
-  Without them, uploads are just disabled.
+- **Desktop players can't use it.** The desktop app only signs in to the official
+  hub. On your relay those official accounts can't be verified, so desktop players
+  join as guests. Nothing breaks. To share a deck with them, use **Copy deck list**
+  and paste it into their deck builder's text import (this works in either
+  direction).
+- **No email allowlist or invites.** Anyone who gets past the Access List can
+  sign up, which in practice means only your friends.
+- **Accounts don't control access to the game.** The relay still lets guests in.
+  The server key and Access List remain the real gate.
+- Avatar and playmat uploads need S3 storage settings (`HUB_S3_*`, not wired into
+  this compose file). Without them, uploads are just turned off.
 
-For most friend groups this isn't worth it: desktop players keep the official
-library, and browser players can paste decklists. This repo doesn't include a hub
-template or compose service.
+### Setting up sign-in
+
+Nobody can create an account until at least one sign-in method is configured. The
+hub reports which are on at `https://play.example.com/hub/api/auth/providers`.
+
+| Method | What to do | `.env` |
+|---|---|---|
+| **Discord** (easiest if your group uses Discord) | [Discord Developer Portal](https://discord.com/developers/applications) → New Application → OAuth2 → add redirect `https://play.example.com/hub/api/auth/callback/discord` | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |
+| **GitHub** | GitHub → Settings → Developer settings → OAuth Apps → New. Homepage `https://play.example.com`, callback `https://play.example.com/hub/api/auth/callback/github` | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| **Email codes** | A [Resend](https://resend.com) account with your domain verified there (they give you DNS records to add) | `RESEND_API_KEY`, `AUTH_EMAIL_FROM` (e.g. `Manabrew <login@example.com>`, on the verified domain) |
+
+You can enable more than one. After editing `.env`, click Update Stack.
+
+**Back up `HUB_DATA_DIR`** (default `/mnt/user/appdata/manabrew/hub`). It holds the
+database (accounts, published decks), the login signing key (if it's lost,
+everyone is signed out), and a downloaded Scryfall card index (about 80 MB). The
+first start downloads that index, so the hub needs internet access.
+
+**Requirement:** the mounted Caddyfile uses an inline compose `configs` block,
+which needs Docker Compose **2.23.1 or newer**. Check with `docker compose version`
+in the Unraid terminal. If it's older, update the Compose Manager plugin.
+
+**Upstream changes:** the mounted Caddyfile replaces the one built into the web
+image. It's a copy of upstream's `ops/standalone.Caddyfile` plus the `/hub`
+route. If a release changes upstream's file (for example a new proxy route),
+copy the change into `docker-compose.yml`.
+
+### Without the hub (templates)
+
+The Unraid templates don't include a hub, so on that setup browser players fall
+back to the official hub and hit the CORS limit above. The workaround is to copy
+and paste decklists: open the deck on `play.manabrew.app`, use **Copy deck list**
+(or the copy button in a deck preview), and paste it into the text import on
+your site. Built-in preset decks always work. (There are also Moxfield and
+Archidekt importers. They haven't been tested from a self-hosted site.)
 
 ## Keeping it private
 
@@ -304,7 +335,8 @@ Limits to be aware of:
   `docker kill --signal=USR1 manabrew-node`. It exits once the current games finish.
 - **Updates:** the templates track `:latest` and the project ships often. Update
   relay, web and node together so they speak the same protocol.
-- **No persistent data:** none of the three containers needs an appdata path.
+- **Persistent data:** only the hub keeps any (`HUB_DATA_DIR`), so back that up.
+  Relay, web and node are stateless.
 - **LAN-only option:** the relay can advertise over mDNS so desktop apps find it
   without any setup (`MANABREW_LAN_ADVERTISE=true`). This needs Network `host` or
   `br0`, and it only helps players on your home network.

@@ -1,12 +1,17 @@
-# Manabrew: relay + browser client + Forge room pool, for Unraid's Compose
-# Manager plugin (or plain `docker compose up -d`). Settings live in .env.
+# Manabrew: relay + browser client + Forge room pool + deck hub (accounts and
+# shared decks), for Unraid's Compose Manager plugin (or plain
+# `docker compose up -d`). Settings live in .env.
 #
-# The stack runs on its own bridge network (manabrew); the node reaches the
-# relay by name there. Only web and relay are published on the Unraid host, and
+# The stack runs on its own bridge network (manabrew); containers reach each
+# other by name there. Only web and relay are published on the Unraid host, and
 # Nginx Proxy Manager forwards to them:
 #   play.example.com  -> http://UNRAID-IP:${WEB_HOST_PORT}
 #   relay.example.com -> http://UNRAID-IP:${RELAY_HOST_PORT}  (Websockets Support ON)
 # If NPM is on br0, enable Settings > Docker > "Host access to custom networks".
+#
+# The hub has no published port: the web container's Caddy serves it at
+# https://play.example.com/hub, so it is same-origin with the app (no CORS) and
+# sits behind the same NPM Access List as the rest of play.example.com.
 
 name: manabrew
 
@@ -20,6 +25,10 @@ services:
     environment:
       MANABREW_SERVER_KEY: "${MANABREW_SERVER_KEY:?set MANABREW_SERVER_KEY in .env}"
       FORGE_MAX_ROOMS: "${FORGE_MAX_ROOMS:-20}"
+      # Verify hub account tokens so signed-in players show verified names.
+      # Tokens it can't verify (e.g. official accounts from the desktop app)
+      # are ignored, and those players join as guests.
+      MANABREW_HUB_JWKS_URL: "http://manabrew-hub:9500/api/auth/jwks"
       RUST_LOG: "manabrew_server=info"
     # WebSocket only; the 9444 health/metrics port stays internal.
     ports:
@@ -46,8 +55,13 @@ services:
       RELAY_PASSWORD: "${WEB_RELAY_PASSWORD:-}"
       HOSTED_AI_ENABLED: "true"
       FORGE_WASM: "${FORGE_WASM:-false}"
+      # Accounts and community decks go to our hub instead of api.manabrew.app.
+      HUB_API_URL: "https://${PLAY_HOST:?set PLAY_HOST in .env}/hub"
     ports:
       - "${WEB_HOST_PORT:-8095}:80"
+    configs:
+      - source: web_caddyfile
+        target: /etc/caddy/Caddyfile
     # Caddy proxies Scryfall symbols per request; Docker's resolver forwarding
     # to a home-lab DNS can drop the burst (upstream compose.selfhost.yml).
     dns: [1.1.1.1, 8.8.8.8]
@@ -58,7 +72,7 @@ services:
         condition: service_healthy
     labels:
       <<: *unraid-icon
-      net.unraid.docker.webui: "https://${PLAY_HOST:-}"
+      net.unraid.docker.webui: "https://${PLAY_HOST}"
 
   node:
     image: ghcr.io/witchesofthehill/manabrew-node:${MANABREW_TAG:-latest}
@@ -80,6 +94,88 @@ services:
       relay:
         condition: service_healthy
     labels: *unraid-icon
+
+  hub:
+    image: ghcr.io/witchesofthehill/manabrew-hub:${MANABREW_TAG:-latest}
+    container_name: manabrew-hub
+    environment:
+      # SQLite database; the login signing key and Scryfall card index are kept
+      # next to it, so the whole directory must persist.
+      HUB_DB_PATH: "/data/hub.db"
+      HUB_PUBLIC_URL: "https://${PLAY_HOST}/hub"
+      WEB_APP_URL: "https://${PLAY_HOST}"
+      DECK_HUB: "1"
+      # Sign-in methods: configure at least one or nobody can create an account.
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      DISCORD_CLIENT_ID: "${DISCORD_CLIENT_ID:-}"
+      DISCORD_CLIENT_SECRET: "${DISCORD_CLIENT_SECRET:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      AUTH_EMAIL_FROM: "${AUTH_EMAIL_FROM:-}"
+      RUST_LOG: "manabrew_hub=info"
+    volumes:
+      - "${HUB_DATA_DIR:-/mnt/user/appdata/manabrew/hub}:/data"
+    networks: [manabrew]
+    restart: unless-stopped
+    labels: *unraid-icon
+
+configs:
+  # Upstream's default web Caddyfile (ops/standalone.Caddyfile) plus /hub.
+  # Replaces the one baked into the image, so re-check it against upstream if a
+  # release changes that file.
+  web_caddyfile:
+    content: |
+      :80 {
+          root * /srv/manabrew
+
+          encode zstd gzip
+
+          # Our deck hub, same-origin: /hub/api/... -> manabrew-hub:9500/api/...
+          handle_path /hub/* {
+              reverse_proxy manabrew-hub:9500
+          }
+
+          # Runtime relay config (rewritten from RELAY_* env on start) - never cache it.
+          @config path /config.js
+          handle @config {
+              header Cache-Control "no-store"
+              file_server
+          }
+
+          @scryfall path_regexp scryfall ^/scryfall-symbols/(.*)$
+          handle @scryfall {
+              rewrite * /card-symbols/{re.scryfall.1}
+              reverse_proxy https://svgs.scryfall.io {
+                  header_up Host svgs.scryfall.io
+                  header_down -Access-Control-Allow-Origin
+                  header_down -Cross-Origin-Resource-Policy
+                  header_down -Cache-Control
+              }
+              header Cache-Control "public, max-age=604800"
+              header Cross-Origin-Resource-Policy "same-origin"
+          }
+
+          @cubecobra path_regexp cubecobra ^/cubecobra-download/cube/download/forge/([A-Za-z0-9-]+)$
+          handle @cubecobra {
+              rewrite * /cube/download/forge/{re.cubecobra.1}
+              reverse_proxy https://cubecobra.com {
+                  header_up Host cubecobra.com
+                  header_down -Access-Control-Allow-Origin
+                  header_down -Set-Cookie
+              }
+              header Cross-Origin-Resource-Policy "same-origin"
+          }
+
+          handle {
+              header {
+                  Cross-Origin-Opener-Policy "same-origin"
+                  Cross-Origin-Embedder-Policy "require-corp"
+                  Cross-Origin-Resource-Policy "same-origin"
+              }
+              try_files {path} /index.html
+              file_server
+          }
+      }
 
 networks:
   manabrew:
