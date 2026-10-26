@@ -194,10 +194,19 @@ all three containers. The settings that matter:
 | node | `SELF_HOSTED_NODE_ROOM_PASSWORD` empty | The browser claims a room without sending a password |
 | node | `SELF_HOSTED_NODE_MAX_GAMES=3` (or more) | How many browser Forge games can run at the same time. Each one uses a room. |
 
-Optional: `FORGE_WASM=true` on web shows a Settings toggle that lets a browser run
-Forge itself. It's a 72 MB download, and the browser falls back to the node if it
-fails the compatibility test. Upstream ships it switched off, so treat it as
-experimental and keep the node anyway.
+Optional: `FORGE_WASM=true` on web makes a browser player's *own tab* run the
+Forge engine when they create a Forge multiplayer table, instead of claiming a
+node room. There's no Settings toggle; it switches on automatically for supported
+browsers. The first time, the browser downloads a 72 MB engine and plays one
+silent trial game. If the browser isn't supported or fails the trial, it falls
+back to the node. It doesn't affect Forge "Play vs AI" (always a node room) or
+desktop players (always local). Upstream turns it on for manabrew.app.
+
+Recommended: leave it `false` when you run the node. The game lives in the host's
+tab, so if they close it, reload, or their laptop sleeps, the table ends for
+everyone. A node room keeps running on your server. Turn it on only if friends
+keep hitting "No self-hosted room is available" and you'd rather not raise
+`NODE_MAX_GAMES`.
 
 ## Keeping it private
 
